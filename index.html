@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mosaic TV</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Archivo', sans-serif; background: #0a0e27; min-height: 100vh; overflow: hidden; color: #fff; }
+        .top-bar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: rgba(15, 20, 40, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; padding: 0 20px; gap: 20px; z-index: 1000; }
+        .logo { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 20px; color: #00ff9f; text-shadow: 0 0 20px rgba(0, 255, 159, 0.5); }
+        .top-bar-buttons { display: flex; gap: 10px; margin-left: auto; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.3s ease; }
+        .add-stream-btn { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; box-shadow: 0 4px 15px rgba(0, 255, 159, 0.3); }
+        .add-stream-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(0, 255, 159, 0.5); }
+        .save-btn { background: linear-gradient(135deg, #f093fb, #f5576c); color: white; box-shadow: 0 4px 15px rgba(240, 147, 251, 0.3); }
+        .save-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(240, 147, 251, 0.5); }
+        .load-btn { background: linear-gradient(135deg, #fa709a, #fee140); color: #0a0e27; box-shadow: 0 4px 15px rgba(250, 112, 154, 0.3); }
+        .load-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(250, 112, 154, 0.5); }
+        .grid-container { position: absolute; top: 60px; left: 0; right: 0; bottom: 0; padding: 20px; overflow: auto; }
+        .grid-container.mobile-layout { display: flex; flex-direction: column; gap: 20px; }
+        .video-card { position: absolute; background: rgba(20, 25, 45, 0.9); border: 2px solid rgba(0, 255, 159, 0.2); border-radius: 12px; padding: 15px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); transition: border-color 0.3s ease, z-index 0s; min-width: 300px; min-height: 250px; z-index: 1; }
+        .video-card.active { border-color: rgba(0, 255, 159, 0.8); box-shadow: 0 10px 40px rgba(0, 255, 159, 0.3); }
+        .video-card.audio-playing { z-index: 1000 !important; border-color: rgba(255, 215, 0, 1) !important; box-shadow: 0 0 30px rgba(255, 215, 0, 0.6), 0 0 60px rgba(255, 215, 0, 0.3) !important; border-width: 3px !important; }
+        .video-card.disabled { opacity: 0.5; z-index: 0; }
+        .video-card.disabled .video-wrapper { pointer-events: none; }
+        .video-card.disabled .card-header { pointer-events: none; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; cursor: move; padding: 5px; border-radius: 6px; transition: background 0.2s ease; }
+        .card-header:hover { background: rgba(0, 255, 159, 0.1); }
+        .channel-name { font-size: 16px; font-weight: 700; color: #00ff9f; text-transform: uppercase; letter-spacing: 1px; }
+        .card-controls { display: flex; gap: 8px; }
+        .close-btn { width: 24px; height: 24px; background: #ff4757; border: none; border-radius: 50%; color: white; font-size: 16px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
+        .close-btn:hover { background: #ff3838; transform: scale(1.1); }
+        .video-wrapper { position: relative; width: 100%; height: calc(100% - 100px); background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+        video { width: 100%; height: 100%; display: block; object-fit: contain; }
+        .controls-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .toggle-container { display: flex; align-items: center; gap: 8px; }
+        .toggle-switch { position: relative; width: 50px; height: 26px; background: #2c3e50; border-radius: 13px; cursor: pointer; transition: background 0.3s ease; border: 2px solid rgba(255, 255, 255, 0.2); }
+        .toggle-switch.on { background: linear-gradient(135deg, #00ff9f, #00b8ff); }
+        .toggle-slider { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: white; border-radius: 50%; transition: transform 0.3s ease; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
+        .toggle-switch.on .toggle-slider { transform: translateX(24px); }
+        .toggle-label { font-size: 12px; color: #95a5a6; font-weight: 600; }
+        .toggle-switch.on + .toggle-label { color: #00ff9f; }
+        .audio-control { padding: 8px 16px; font-size: 14px; font-weight: 600; border: 2px solid; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px; background: transparent; }
+        .audio-control.muted { border-color: #ff4757; color: #ff4757; }
+        .audio-control.muted:hover { background: #ff4757; color: white; }
+        .audio-control.unmuted { border-color: #00ff9f; color: #00ff9f; }
+        .audio-control.unmuted:hover { background: #00ff9f; color: #0a0e27; }
+        .status { font-size: 11px; color: #7f8c8d; padding: 4px 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; font-family: 'Space Mono', monospace; }
+        .status.loading { color: #3498db; }
+        .status.error { color: #e74c3c; }
+        .status.playing { color: #2ecc71; }
+        .resize-handle { position: absolute; width: 15px; height: 15px; background: #00ff9f; border: 2px solid #0a0e27; border-radius: 3px; cursor: nwse-resize; opacity: 0; transition: opacity 0.2s ease; }
+        .video-card:hover .resize-handle { opacity: 1; }
+        .resize-handle.bottom-right { bottom: 5px; right: 5px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(5px); z-index: 2000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1a1f35; padding: 30px; border-radius: 12px; border: 2px solid rgba(0, 255, 159, 0.3); max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+        .modal-header { font-size: 24px; font-weight: 700; color: #00ff9f; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 14px; font-weight: 600; color: #95a5a6; margin-bottom: 8px; }
+        .form-input { width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: white; font-size: 14px; transition: border-color 0.3s ease; }
+        .form-input:focus { outline: none; border-color: #00ff9f; }
+        .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .modal-btn.cancel { background: transparent; border: 2px solid #7f8c8d; color: #7f8c8d; }
+        .modal-btn.cancel:hover { border-color: #95a5a6; color: #95a5a6; }
+        .modal-btn.confirm { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; }
+        .modal-btn.confirm:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 255, 159, 0.5); }
+        @media (max-width: 768px) {
+            .top-bar { padding: 0 10px; flex-wrap: wrap; height: auto; min-height: 60px; }
+            .logo { font-size: 16px; }
+            .top-bar-buttons { width: 100%; justify-content: space-between; margin-top: 10px; margin-left: 0; }
+            .btn { padding: 8px 12px; font-size: 12px; flex: 1; }
+            .grid-container { top: 120px; padding: 10px; overflow-y: auto; overflow-x: hidden; }
+            .video-card { position: relative !important; width: 100% !important; height: auto !important; min-height: 300px !important; margin-bottom: 20px; left: 0 !important; top: 0 !important; }
+            .card-header { cursor: default; }
+            .video-wrapper { height: 250px !important; }
+            .controls-row { flex-direction: row; align-items: center; justify-content: space-between; }
+            .resize-handle { display: none; }
+            .modal-content { width: 95%; padding: 20px; }
+        }
+        @media (max-width: 480px) {
+            .controls-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .toggle-container, .audio-control { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">📺 MOSAIC TV</div>
+        <div class="top-bar-buttons">
+            <button class="btn add-stream-btn" id="addStreamBtn">+ Aggiungi Stream</button>
+            <button class="btn save-btn" id="saveConfigBtn">💾 Salva Config</button>
+            <button class="btn load-btn" id="loadConfigBtn">📂 Carica Config</button>
+        </div>
+    </div>
+    <div class="grid-container" id="gridContainer"></div>
+    <div class="modal" id="addStreamModal">
+        <div class="modal-content">
+            <div class="modal-header">Aggiungi Nuovo Stream</div>
+            <div class="form-group">
+                <label class="form-label">Nome Canale</label>
+                <input type="text" class="form-input" id="channelName" placeholder="Scrivi il nome canale qui">
+            </div>
+            <div class="form-group">
+                <label class="form-label">URL Stream (m3u8)</label>
+                <input type="text" class="form-input" id="streamUrl" placeholder="https://...">
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="cancelBtn">Annulla</button>
+                <button class="modal-btn confirm" id="confirmBtn">Aggiungi</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        let channels = [
+
+        ];
+        let draggedElement = null;
+        let dragOffset = { x: 0, y: 0 };
+        let resizingElement = null;
+        let resizeStart = { x: 0, y: 0, width: 0, height: 0 };
+        let isMobile = window.innerWidth <= 768;
+        let hlsInstances = {};
+        function updateZIndexPriorities() {
+            const cards = document.querySelectorAll('.video-card:not(.disabled)');
+            const priorities = [];
+            cards.forEach((card) => {
+                const index = parseInt(card.id.split('-')[1]);
+                const video = document.getElementById('video-' + index);
+                const toggle = document.getElementById('toggle-' + index);
+                if (!video || !toggle || !toggle.classList.contains('on')) {
+                    card.style.zIndex = '1';
+                    card.classList.remove('audio-playing');
+                    return;
+                }
+                const isAudioOn = !video.muted;
+                const isPlaying = !video.paused;
+                const cardArea = card.offsetWidth * card.offsetHeight;
+                let priority = 10;
+                if (isAudioOn && isPlaying) {
+                    priority = 1000;
+                    card.classList.add('audio-playing');
+                } else {
+                    card.classList.remove('audio-playing');
+                    priority = 10 + Math.floor(cardArea / 1000);
+                }
+                priorities.push({ card, priority, index });
+            });
+            priorities.sort((a, b) => a.priority - b.priority);
+            priorities.forEach((item) => { item.card.style.zIndex = String(item.priority); });
+        }
+        window.addEventListener('resize', () => {
+            const wasMobile = isMobile;
+            isMobile = window.innerWidth <= 768;
+            if (wasMobile !== isMobile) updateLayoutMode();
+        });
+        function updateLayoutMode() {
+            const container = document.getElementById('gridContainer');
+            if (isMobile) container.classList.add('mobile-layout');
+            else container.classList.remove('mobile-layout');
+        }
+        function initializeGrid() {
+            const container = document.getElementById('gridContainer');
+            updateLayoutMode();
+            const activeStates = {};
+            channels.forEach((channel, index) => {
+                const existingCard = document.getElementById('card-' + index);
+                if (existingCard) {
+                    const toggle = document.getElementById('toggle-' + index);
+                    const video = document.getElementById('video-' + index);
+                    if (toggle && toggle.classList.contains('on') && video) {
+                        activeStates[index] = { isPlaying: !video.paused, currentTime: video.currentTime, muted: video.muted };
+                    }
+                }
+            });
+            container.innerHTML = '';
+            channels.forEach((channel, index) => { createVideoCard(channel, index, activeStates[index]); });
+            setTimeout(() => { updateZIndexPriorities(); }, 500);
+        }
+        function createVideoCard(channel, index, savedState) {
+            savedState = savedState || null;
+            const container = document.getElementById('gridContainer');
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.id = 'card-' + index;
+            card.style.left = channel.x + 'px';
+            card.style.top = channel.y + 'px';
+            card.style.width = channel.width + 'px';
+            card.style.height = channel.height + 'px';
+            var videoId = 'video-' + index;
+            var toggleId = 'toggle-' + index;
+            var audioId = 'audio-' + index;
+            var statusId = 'status-' + index;
+            card.innerHTML = '<div class="card-header" data-index="' + index + '"><div class="channel-name">' + channel.name + '</div><div class="card-controls"><button class="close-btn" data-index="' + index + '">×</button></div></div><div class="video-wrapper"><video id="' + videoId + '" controls></video></div><div class="controls-row"><div class="toggle-container"><div class="toggle-switch" id="' + toggleId + '" data-index="' + index + '"><div class="toggle-slider"></div></div><span class="toggle-label">OFF</span></div><button class="audio-control muted" id="' + audioId + '"><span>🔇</span><span>Audio</span></button><div class="status loading" id="' + statusId + '">Standby</div></div><div class="resize-handle bottom-right" data-index="' + index + '"></div>';
+            container.appendChild(card);
+            var header = card.querySelector('.card-header');
+            if (!isMobile) header.addEventListener('mousedown', startDrag);
+            var resizeHandle = card.querySelector('.resize-handle');
+            if (!isMobile) resizeHandle.addEventListener('mousedown', startResize);
+            var closeBtn = card.querySelector('.close-btn');
+            closeBtn.addEventListener('click', function() { removeChannel(index); });
+            var toggle = document.getElementById(toggleId);
+            var video = document.getElementById(videoId);
+            var audioBtn = document.getElementById(audioId);
+            var status = document.getElementById(statusId);
+            video.muted = channel.isMuted !== undefined ? channel.isMuted : true;
+            video.volume = 0.7;
+            var shouldBeActive = savedState || channel.isActive;
+            if (shouldBeActive) {
+                toggle.classList.add('on');
+                toggle.nextElementSibling.textContent = 'ON';
+                card.classList.remove('disabled');
+                card.classList.add('active');
+                setTimeout(function() {
+                    initializeStream(channel, videoId, audioId, statusId);
+                    if (savedState) {
+                        video.muted = savedState.muted;
+                        if (savedState.isPlaying) { video.currentTime = savedState.currentTime; video.play().catch(function(e) {}); }
+                    } else if (channel.isMuted !== undefined) { video.muted = channel.isMuted; }
+                    if (!video.muted) { audioBtn.className = 'audio-control unmuted'; audioBtn.innerHTML = '<span>🔊</span><span>Audio</span>'; }
+                }, 100);
+            }
+            toggle.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var cardElement = this.closest('.video-card');
+                var cardId = cardElement.id;
+                var currentIndex = parseInt(cardId.split('-')[1]);
+                var currentChannel = channels[currentIndex];
+                var currentVideo = document.getElementById('video-' + currentIndex);
+                var currentAudioBtn = document.getElementById('audio-' + currentIndex);
+                var currentStatus = document.getElementById('status-' + currentIndex);
+                var toggleLabel = this.nextElementSibling;
+                if (this.classList.contains('on')) {
+                    this.classList.remove('on');
+                    toggleLabel.textContent = 'OFF';
+                    cardElement.classList.add('disabled');
+                    cardElement.classList.remove('active');
+                    if (currentVideo) {
+                        currentVideo.pause();
+                        if (hlsInstances[currentIndex]) { hlsInstances[currentIndex].destroy(); delete hlsInstances[currentIndex]; }
+                        currentVideo.removeAttribute('src');
+                        currentVideo.load();
+                    }
+                    if (currentStatus) { currentStatus.textContent = 'Standby'; currentStatus.className = 'status'; }
+                    currentChannel.isActive = false;
+                    currentChannel.isMuted = currentVideo ? currentVideo.muted : true;
+                    updateZIndexPriorities();
+                } else {
+                    this.classList.add('on');
+                    toggleLabel.textContent = 'ON';
+                    cardElement.classList.remove('disabled');
+                    cardElement.classList.add('active');
+                    currentChannel.isActive = true;
+                    if (currentVideo && currentChannel) {
+                        currentStatus.textContent = 'Caricamento...';
+                        currentStatus.className = 'status loading';
+                        initializeStream(currentChannel, 'video-' + currentIndex, 'audio-' + currentIndex, 'status-' + currentIndex);
+                        setTimeout(function() { updateZIndexPriorities(); }, 500);
+                    }
+                }
+            });
+            audioBtn.addEventListener('click', function() {
+                video.muted = !video.muted;
+                if (video.muted) { audioBtn.className = 'audio-control muted'; audioBtn.innerHTML = '<span>🔇</span><span>Audio</span>'; }
+                else { audioBtn.className = 'audio-control unmuted'; audioBtn.innerHTML = '<span>🔊</span><span>Audio</span>'; }
+                if (channels[index]) channels[index].isMuted = video.muted;
+                updateZIndexPriorities();
+            });
+        }
+        function initializeStream(channel, videoId, audioId, statusId) {
+            var video = document.getElementById(videoId);
+            var status = document.getElementById(statusId);
+            var index = parseInt(videoId.split('-')[1]);
+            if (hlsInstances[index]) { hlsInstances[index].destroy(); delete hlsInstances[index]; }
+            status.textContent = 'Caricamento...';
+            status.className = 'status loading';
+            if (Hls.isSupported()) {
+                var hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 90 });
+                hlsInstances[index] = hls;
+                hls.loadSource(channel.url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    status.textContent = 'Pronto';
+                    status.className = 'status playing';
+                    video.play().catch(function(e) { status.textContent = 'Click play'; status.className = 'status'; });
+                });
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal) { status.textContent = 'Errore'; status.className = 'status error'; }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', function() {
+                    status.textContent = 'Pronto';
+                    status.className = 'status playing';
+                    video.play().catch(function(e) { status.textContent = 'Click play'; status.className = 'status'; });
+                });
+            } else { status.textContent = 'Browser non supportato'; status.className = 'status error'; }
+            video.addEventListener('playing', function() { status.textContent = 'In riproduzione'; status.className = 'status playing'; updateZIndexPriorities(); });
+            video.addEventListener('pause', function() { updateZIndexPriorities(); });
+            video.addEventListener('waiting', function() { status.textContent = 'Buffering...'; status.className = 'status loading'; });
+        }
+        function startDrag(e) {
+            if (e.target.classList.contains('close-btn')) return;
+            var index = e.currentTarget.dataset.index;
+            draggedElement = document.getElementById('card-' + index);
+            var rect = draggedElement.getBoundingClientRect();
+            dragOffset.x = e.clientX - rect.left;
+            dragOffset.y = e.clientY - rect.top;
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+            e.preventDefault();
+        }
+        function drag(e) {
+            if (!draggedElement) return;
+            var containerRect = document.getElementById('gridContainer').getBoundingClientRect();
+            var x = Math.max(0, e.clientX - containerRect.left - dragOffset.x);
+            var y = Math.max(0, e.clientY - containerRect.top - dragOffset.y);
+            draggedElement.style.left = x + 'px';
+            draggedElement.style.top = y + 'px';
+        }
+        function stopDrag() {
+            if (draggedElement) {
+                var index = parseInt(draggedElement.id.split('-')[1]);
+                channels[index].x = parseInt(draggedElement.style.left);
+                channels[index].y = parseInt(draggedElement.style.top);
+            }
+            draggedElement = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+        function startResize(e) {
+            var index = e.currentTarget.dataset.index;
+            resizingElement = document.getElementById('card-' + index);
+            var rect = resizingElement.getBoundingClientRect();
+            resizeStart.x = e.clientX; resizeStart.y = e.clientY;
+            resizeStart.width = rect.width; resizeStart.height = rect.height;
+            document.addEventListener('mousemove', resize);
+            document.addEventListener('mouseup', stopResize);
+            e.preventDefault(); e.stopPropagation();
+        }
+        function resize(e) {
+            if (!resizingElement) return;
+            resizingElement.style.width = Math.max(300, resizeStart.width + e.clientX - resizeStart.x) + 'px';
+            resizingElement.style.height = Math.max(250, resizeStart.height + e.clientY - resizeStart.y) + 'px';
+        }
+        function stopResize() {
+            if (resizingElement) {
+                var index = parseInt(resizingElement.id.split('-')[1]);
+                channels[index].width = parseInt(resizingElement.style.width);
+                channels[index].height = parseInt(resizingElement.style.height);
+                updateZIndexPriorities();
+            }
+            resizingElement = null;
+            document.removeEventListener('mousemove', resize);
+            document.removeEventListener('mouseup', stopResize);
+        }
+        function removeChannel(index) {
+            var card = document.getElementById('card-' + index);
+            if (card) {
+                var video = document.getElementById('video-' + index);
+                if (video) { video.pause(); video.src = ''; }
+                if (hlsInstances[index]) { hlsInstances[index].destroy(); delete hlsInstances[index]; }
+                card.remove();
+                channels.splice(index, 1);
+                updateCardIndices();
+            }
+        }
+        function updateCardIndices() {
+            var container = document.getElementById('gridContainer');
+            var cards = container.querySelectorAll('.video-card');
+            cards.forEach(function(card, newIndex) {
+                card.id = 'card-' + newIndex;
+                var header = card.querySelector('.card-header'); if (header) header.dataset.index = newIndex;
+                var closeBtn = card.querySelector('.close-btn'); if (closeBtn) closeBtn.dataset.index = newIndex;
+                var resizeHandle = card.querySelector('.resize-handle'); if (resizeHandle) resizeHandle.dataset.index = newIndex;
+                var toggle = card.querySelector('.toggle-switch'); if (toggle) { toggle.id = 'toggle-' + newIndex; toggle.dataset.index = newIndex; }
+                var video = card.querySelector('video'); if (video) video.id = 'video-' + newIndex;
+                var audioBtn = card.querySelector('.audio-control'); if (audioBtn) audioBtn.id = 'audio-' + newIndex;
+                var status = card.querySelector('.status'); if (status) status.id = 'status-' + newIndex;
+                var newCloseBtn = card.querySelector('.close-btn');
+                if (newCloseBtn) {
+                    newCloseBtn.replaceWith(newCloseBtn.cloneNode(true));
+                    var updatedCloseBtn = card.querySelector('.close-btn');
+                    updatedCloseBtn.addEventListener('click', function() { removeChannel(newIndex); });
+                }
+            });
+        }
+        var modal = document.getElementById('addStreamModal');
+        var addStreamBtn = document.getElementById('addStreamBtn');
+        var cancelBtn = document.getElementById('cancelBtn');
+        var confirmBtn = document.getElementById('confirmBtn');
+        var channelNameInput = document.getElementById('channelName');
+        var streamUrlInput = document.getElementById('streamUrl');
+        addStreamBtn.addEventListener('click', function() { modal.classList.add('active'); channelNameInput.value = ''; streamUrlInput.value = ''; channelNameInput.focus(); });
+        cancelBtn.addEventListener('click', function() { modal.classList.remove('active'); });
+        modal.addEventListener('click', function(e) { if (e.target === modal) modal.classList.remove('active'); });
+        confirmBtn.addEventListener('click', function() {
+            var name = channelNameInput.value.trim();
+            var url = streamUrlInput.value.trim();
+            if (!name || !url) { alert('Inserisci nome e URL dello stream'); return; }
+            channels.push({ name: name, url: url, x: 20 + (channels.length % 3) * 420, y: 20 + Math.floor(channels.length / 3) * 380, width: 400, height: 350, isActive: false, isMuted: true });
+            initializeGrid();
+            modal.classList.remove('active');
+        });
+        var saveConfigBtn = document.getElementById('saveConfigBtn');
+        var loadConfigBtn = document.getElementById('loadConfigBtn');
+        saveConfigBtn.addEventListener('click', function() {
+            try {
+                var configData = { version: '1.0', timestamp: new Date().toISOString(), channels: channels };
+                var blob = new Blob([JSON.stringify(configData, null, 2)], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a'); a.href = url; a.download = 'mosaic-tv-config-' + new Date().toISOString().split('T')[0] + '.json';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                var originalText = saveConfigBtn.innerHTML;
+                saveConfigBtn.innerHTML = '✓ Salvato!'; saveConfigBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+                setTimeout(function() { saveConfigBtn.innerHTML = originalText; saveConfigBtn.style.background = 'linear-gradient(135deg, #f093fb, #f5576c)'; }, 2000);
+            } catch(e) { alert('Errore nel salvataggio'); }
+        });
+        loadConfigBtn.addEventListener('click', function() {
+            var fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = '.json';
+            fileInput.addEventListener('change', function(e) {
+                var file = e.target.files[0]; if (!file) return;
+                var reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        var configData = JSON.parse(event.target.result);
+                        if (configData.channels && Array.isArray(configData.channels)) {
+                            channels = configData.channels.map(function(ch) { return Object.assign({}, ch, { isActive: ch.isActive || false, isMuted: ch.isMuted !== undefined ? ch.isMuted : true }); });
+                            initializeGrid();
+                            var originalText = loadConfigBtn.innerHTML;
+                            loadConfigBtn.innerHTML = '✓ Caricato!'; loadConfigBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+                            setTimeout(function() { loadConfigBtn.innerHTML = originalText; loadConfigBtn.style.background = 'linear-gradient(135deg, #fa709a, #fee140)'; }, 2000);
+                        } else { alert('File non valido'); }
+                    } catch(e) { alert('Errore lettura file'); }
+                };
+                reader.readAsText(file);
+            });
+            fileInput.click();
+        });
+        initializeGrid();
+        setInterval(function() { updateZIndexPriorities(); }, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0e27">
+    <title>Mosaic TV</title>
+    <script src="https://cdn.jsdelivr.net/npm/shaka-player@5.0.0/dist/shaka-player.compiled.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Archivo', sans-serif; background: #0a0e27; min-height: 100vh; overflow: hidden; color: #fff; -webkit-tap-highlight-color: transparent; touch-action: pan-y; }
+        
+        /* Miglioramenti touch */
+        button, .toggle-switch, .card-header { -webkit-tap-highlight-color: rgba(0, 255, 159, 0.2); }
+        .btn, .audio-control, .toggle-switch, .close-btn { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+        
+        /* Aumenta l'area touch dei pulsanti su mobile */
+        @media (max-width: 768px) {
+            .btn { min-height: 44px; }
+            .close-btn { width: 32px; height: 32px; font-size: 18px; }
+            .toggle-switch { width: 60px; height: 30px; }
+            .toggle-slider { width: 22px; height: 22px; }
+            .toggle-switch.on .toggle-slider { transform: translateX(30px); }
+            .audio-control { min-height: 44px; padding: 10px 18px; }
+        }
+        .top-bar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: rgba(15, 20, 40, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; padding: 0 20px; gap: 20px; z-index: 1000; }
+        .logo { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 20px; color: #00ff9f; text-shadow: 0 0 20px rgba(0, 255, 159, 0.5); }
+        .top-bar-buttons { display: flex; gap: 10px; margin-left: auto; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.3s ease; }
+        .add-stream-btn { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; box-shadow: 0 4px 15px rgba(0, 255, 159, 0.3); }
+        .add-stream-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(0, 255, 159, 0.5); }
+        .save-btn { background: linear-gradient(135deg, #f093fb, #f5576c); color: white; box-shadow: 0 4px 15px rgba(240, 147, 251, 0.3); }
+        .save-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(240, 147, 251, 0.5); }
+        .load-btn { background: linear-gradient(135deg, #fa709a, #fee140); color: #0a0e27; box-shadow: 0 4px 15px rgba(250, 112, 154, 0.3); }
+        .load-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(250, 112, 154, 0.5); }
+        .grid-container { position: absolute; top: 60px; left: 0; right: 0; bottom: 0; padding: 20px; overflow: auto; }
+        .grid-container.mobile-layout { display: flex; flex-direction: column; gap: 25px; }
+        .video-card { position: absolute; background: rgba(20, 25, 45, 0.9); border: 2px solid rgba(0, 255, 159, 0.2); border-radius: 12px; padding: 15px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); transition: border-color 0.3s ease, box-shadow 0.3s ease; min-width: 300px; min-height: 250px; z-index: 1; }
+        .video-card.active { border-color: rgba(0, 255, 159, 0.8); box-shadow: 0 10px 40px rgba(0, 255, 159, 0.3); }
+        .video-card.audio-playing { border-color: rgba(255, 215, 0, 1) !important; box-shadow: 0 0 30px rgba(255, 215, 0, 0.6), 0 0 60px rgba(255, 215, 0, 0.3) !important; border-width: 3px !important; }
+        .video-card.disabled { opacity: 0.5; }
+        .video-card.disabled .video-wrapper video { pointer-events: none; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; cursor: move; padding: 5px; border-radius: 6px; transition: background 0.2s ease; }
+        .card-header:hover { background: rgba(0, 255, 159, 0.1); }
+        .channel-name { font-size: 16px; font-weight: 700; color: #00ff9f; text-transform: uppercase; letter-spacing: 1px; }
+        .card-controls { display: flex; gap: 8px; }
+        .close-btn { width: 24px; height: 24px; background: #ff4757; border: none; border-radius: 50%; color: white; font-size: 16px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
+        .close-btn:hover { background: #ff3838; transform: scale(1.1); }
+        .video-wrapper { position: relative; width: 100%; height: calc(100% - 100px); background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+        video { width: 100%; height: 100%; display: block; object-fit: contain; }
+        .controls-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .toggle-container { display: flex; align-items: center; gap: 8px; }
+        .toggle-switch { position: relative; width: 50px; height: 26px; background: #2c3e50; border-radius: 13px; cursor: pointer; transition: background 0.3s ease; border: 2px solid rgba(255, 255, 255, 0.2); }
+        .toggle-switch.on { background: linear-gradient(135deg, #00ff9f, #00b8ff); }
+        .toggle-slider { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: white; border-radius: 50%; transition: transform 0.3s ease; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
+        .toggle-switch.on .toggle-slider { transform: translateX(24px); }
+        .toggle-label { font-size: 12px; color: #95a5a6; font-weight: 600; }
+        .toggle-switch.on + .toggle-label { color: #00ff9f; }
+        .audio-control { padding: 8px 16px; font-size: 14px; font-weight: 600; border: 2px solid; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px; background: transparent; }
+        .audio-control.muted { border-color: #ff4757; color: #ff4757; }
+        .audio-control.muted:hover { background: #ff4757; color: white; }
+        .audio-control.unmuted { border-color: #00ff9f; color: #00ff9f; }
+        .audio-control.unmuted:hover { background: #00ff9f; color: #0a0e27; }
+        .status { font-size: 11px; color: #7f8c8d; padding: 4px 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; font-family: 'Space Mono', monospace; }
+        .status.loading { color: #3498db; }
+        .status.error { color: #e74c3c; }
+        .status.playing { color: #2ecc71; }
+        .resize-handle { position: absolute; width: 15px; height: 15px; background: #00ff9f; border: 2px solid #0a0e27; border-radius: 3px; cursor: nwse-resize; opacity: 0; transition: opacity 0.2s ease; }
+        .video-card:hover .resize-handle { opacity: 1; }
+        .resize-handle.bottom-right { bottom: 5px; right: 5px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(5px); z-index: 2000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1a1f35; padding: 30px; border-radius: 12px; border: 2px solid rgba(0, 255, 159, 0.3); max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+        .modal-header { font-size: 24px; font-weight: 700; color: #00ff9f; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 14px; font-weight: 600; color: #95a5a6; margin-bottom: 8px; }
+        .form-input { width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: white; font-size: 14px; transition: border-color 0.3s ease; }
+        .form-input:focus { outline: none; border-color: #00ff9f; }
+        .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .modal-btn.cancel { background: transparent; border: 2px solid #7f8c8d; color: #7f8c8d; }
+        .modal-btn.cancel:hover { border-color: #95a5a6; color: #95a5a6; }
+        .modal-btn.confirm { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; }
+        .modal-btn.confirm:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 255, 159, 0.5); }
+        @media (max-width: 768px) {
+            .top-bar { padding: 0 10px; flex-wrap: wrap; height: auto; min-height: 60px; }
+            .logo { font-size: 16px; }
+            .top-bar-buttons { width: 100%; justify-content: space-between; margin-top: 10px; margin-left: 0; }
+            .btn { padding: 8px 12px; font-size: 12px; flex: 1; }
+            .grid-container { top: 120px; padding: 10px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+            .grid-container.mobile-layout { gap: 30px; padding: 15px; }
+            .video-card { position: relative !important; width: 100% !important; height: auto !important; min-height: 300px !important; margin-bottom: 30px !important; left: 0 !important; top: 0 !important; }
+            .card-header { cursor: default; }
+            .video-wrapper { height: 250px !important; }
+            .controls-row { flex-direction: row; align-items: center; justify-content: space-between; }
+            .resize-handle { display: none; }
+            .modal-content { width: 95%; padding: 20px; }
+        }
+        
+        /* Tablet Portrait (481px - 768px) */
+        @media (min-width: 481px) and (max-width: 768px) {
+            .video-card { min-height: 400px !important; margin-bottom: 35px !important; }
+            .video-wrapper { height: 320px !important; }
+            .grid-container.mobile-layout { gap: 35px; }
+        }
+        
+        /* Tablet Landscape (769px - 1024px) */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .grid-container { padding: 15px; }
+            .video-card { min-width: 350px; min-height: 280px; }
+            .resize-handle { opacity: 0.7; width: 20px; height: 20px; }
+            .card-header { padding: 8px; }
+        }
+        
+        @media (max-width: 480px) {
+            .controls-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .toggle-container, .audio-control { width: 100%; justify-content: center; }
+            .video-wrapper { height: 220px !important; }
+            .logo { font-size: 14px; }
+            .btn { font-size: 11px; padding: 6px 10px; }
+            .video-card { margin-bottom: 25px !important; }
+            .grid-container.mobile-layout { gap: 25px; }
+        }
+        
+        /* Landscape su smartphone */
+        @media (max-width: 768px) and (orientation: landscape) {
+            .top-bar { height: 50px; min-height: 50px; padding: 0 8px; }
+            .grid-container { top: 100px; }
+            .video-wrapper { height: 200px !important; }
+            .logo { font-size: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">📺 MOSAIC TV</div>
+        <div class="top-bar-buttons">
+            <button class="btn add-stream-btn" id="addStreamBtn">+ Aggiungi Stream</button>
+            <button class="btn save-btn" id="saveConfigBtn">💾 Salva Config</button>
+            <button class="btn load-btn" id="loadConfigBtn">📂 Carica Config</button>
+        </div>
+    </div>
+    <div class="grid-container" id="gridContainer"></div>
+
+    <div class="modal" id="addStreamModal">
+        <div class="modal-content">
+            <div class="modal-header">Aggiungi Stream</div>
+            <div class="form-group">
+                <label class="form-label">Nome Canale</label>
+                <input type="text" class="form-input" id="channelName" placeholder="Scrivi nome canale">
+            </div>
+            <div class="form-group">
+                <label class="form-label">URL Stream (HLS/DASH)</label>
+                <input type="text" class="form-input" id="streamUrl" placeholder="https://...">
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="cancelBtn">Annulla</button>
+                <button class="modal-btn confirm" id="confirmBtn">Aggiungi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ====== STATO GLOBALE ======
+        var channels = [];
+        var shakaPlayers = {};
+        var draggedElement = null;
+        var resizingElement = null;
+        var offsetX = 0, offsetY = 0, startX = 0, startY = 0, startWidth = 0, startHeight = 0;
+        var isMobile = window.innerWidth <= 768;
+        var isTablet = window.innerWidth > 480 && window.innerWidth <= 1024;
+        var touchStartDistance = 0;
+        var initialPinchWidth = 0;
+        var initialPinchHeight = 0;
+
+        // ====== UTILITY FUNCTIONS ======
+        function debounce(func, wait) {
+            var timeout;
+            return function() {
+                var context = this, args = arguments;
+                clearTimeout(timeout);
+                timeout = setTimeout(function() { func.apply(context, args); }, wait);
+            };
+        }
+
+        function getCardSize(card) {
+            return parseInt(card.style.width) || card.offsetWidth;
+        }
+
+        function isVideoPlaying(video) {
+            return video && !video.paused && video.readyState > 2;
+        }
+        
+        function isTouchDevice() {
+            return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        }
+        
+        function getTouchDistance(touch1, touch2) {
+            var dx = touch1.clientX - touch2.clientX;
+            var dy = touch1.clientY - touch2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        
+        function getEventCoords(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            if (e.clientX !== undefined && e.clientY !== undefined) {
+                return { x: e.clientX, y: e.clientY };
+            }
+            return { x: 0, y: 0 };
+        }
+
+        // ====== PRIORITÀ VISUALE ======
+        function updateZIndexPriorities() {
+            if (isMobile) return;
+            
+            var cards = Array.from(document.querySelectorAll('.video-card'));
+            if (cards.length === 0) return;
+
+            var cardData = cards.map(function(card) {
+                var index = parseInt(card.id.split('-')[1]);
+                var channel = channels[index];
+                var video = document.getElementById('video-' + index);
+                var width = getCardSize(card);
+                var isActive = channel && channel.isActive;
+                var hasAudio = isActive && !channel.isMuted && isVideoPlaying(video);
+                
+                return {
+                    card: card,
+                    index: index,
+                    width: width,
+                    hasAudio: hasAudio,
+                    isActive: isActive
+                };
+            });
+
+            var withAudio = cardData.filter(function(d) { return d.hasAudio; });
+            var mutedActive = cardData.filter(function(d) { return d.isActive && !d.hasAudio; });
+            var inactive = cardData.filter(function(d) { return !d.isActive; });
+
+            function sortByWidthDesc(a, b) { return b.width - a.width; }
+            withAudio.sort(sortByWidthDesc);
+            mutedActive.sort(sortByWidthDesc);
+
+            var baseZIndexMuted = 100;
+            var baseZIndexAudio = 1000;
+            
+            inactive.forEach(function(d) {
+                d.card.style.zIndex = 1;
+                d.card.classList.remove('audio-playing');
+            });
+
+            mutedActive.forEach(function(d, i) {
+                d.card.style.zIndex = baseZIndexMuted + (mutedActive.length - i);
+                d.card.classList.remove('audio-playing');
+            });
+
+            withAudio.forEach(function(d, i) {
+                d.card.style.zIndex = baseZIndexAudio + (withAudio.length - i);
+                d.card.classList.add('audio-playing');
+            });
+        }
+
+        var debouncedUpdatePriorities = debounce(updateZIndexPriorities, 300);
+
+        // ====== CLEANUP: Distrugge tutte le istanze Shaka ======
+        function destroyAllHlsInstances() {
+            Object.keys(shakaPlayers).forEach(function(key) {
+                try {
+                    shakaPlayers[key].destroy();
+                } catch(e) {
+                    console.warn('Errore distruzione Shaka istanza ' + key, e);
+                }
+            });
+            shakaPlayers = {};
+        }
+
+        // ====== CLEANUP: Distrugge singola istanza Shaka e rilascia video ======
+        function destroyVideoInstance(index) {
+            var video = document.getElementById('video-' + index);
+            if (video) {
+                video.pause();
+                video.removeAttribute('src');
+                video.load(); // Rilascia risorse media
+            }
+            if (shakaPlayers[index]) {
+                try {
+                    shakaPlayers[index].destroy();
+                } catch(e) {
+                    console.warn('Errore distruzione Shaka ' + index, e);
+                }
+                delete shakaPlayers[index];
+            }
+        }
+
+        // ====== INIZIALIZZAZIONE GRIGLIA ======
+        function initializeGrid() {
+            // FIX: Distruggi tutte le istanze HLS prima di ricreare la griglia
+            destroyAllHlsInstances();
+            
+            var container = document.getElementById('gridContainer');
+            container.innerHTML = '';
+            
+            if (isMobile) {
+                container.classList.add('mobile-layout');
+            } else {
+                container.classList.remove('mobile-layout');
+            }
+
+            channels.forEach(function(channel, index) {
+                createVideoCard(channel, index);
+            });
+        }
+
+        // ====== CREAZIONE CARD VIDEO ======
+        function createVideoCard(channel, index) {
+            var container = document.getElementById('gridContainer');
+            var card = document.createElement('div');
+            card.className = 'video-card' + (channel.isActive ? ' active' : ' disabled');
+            card.id = 'card-' + index;
+
+            if (!isMobile) {
+                card.style.left = channel.x + 'px';
+                card.style.top = channel.y + 'px';
+                card.style.width = channel.width + 'px';
+                card.style.height = channel.height + 'px';
+            }
+
+            var html = '<div class="card-header">' +
+                '<span class="channel-name">' + escapeHtml(channel.name) + '</span>' +
+                '<div class="card-controls">' +
+                '<button class="close-btn" aria-label="Chiudi">×</button>' +
+                '</div></div>' +
+                '<div class="video-wrapper"><video id="video-' + index + '" muted playsinline ' + (channel.isActive ? 'autoplay' : '') + '></video></div>' +
+                '<div class="controls-row">' +
+                '<div class="toggle-container">' +
+                '<div class="toggle-switch ' + (channel.isActive ? 'on' : '') + '" id="toggle-' + index + '">' +
+                '<div class="toggle-slider"></div></div>' +
+                '<span class="toggle-label">Video ' + (channel.isActive ? 'ON' : 'OFF') + '</span></div>' +
+                '<button class="audio-control ' + (channel.isMuted ? 'muted' : 'unmuted') + '" id="audio-' + index + '">' +
+                '<span>' + (channel.isMuted ? '🔇 Muto' : '🔊 Audio') + '</span></button>' +
+                '<span class="status" id="status-' + index + '">● Pronto</span></div>';
+
+            if (!isMobile) {
+                html += '<div class="resize-handle bottom-right"></div>';
+            }
+
+            card.innerHTML = html;
+            container.appendChild(card);
+
+            setupCardEvents(card, index);
+            
+            if (channel.isActive) {
+                initializeVideo(index);
+            }
+        }
+        
+        // ====== XSS Protection ======
+        function escapeHtml(text) {
+            var div = document.createElement('div');
+            div.appendChild(document.createTextNode(text));
+            return div.innerHTML;
+        }
+
+        // ====== SETUP EVENTI CARD ======
+        function setupCardEvents(card, index) {
+            function getCurrentIndex() {
+                return parseInt(card.id.split('-')[1]);
+            }
+            
+            var toggle = card.querySelector('.toggle-switch');
+            toggle.addEventListener('click', function() {
+                toggleVideo(getCurrentIndex());
+            });
+
+            var audioBtn = card.querySelector('.audio-control');
+            audioBtn.addEventListener('click', function() {
+                toggleAudio(getCurrentIndex());
+            });
+
+            var closeBtn = card.querySelector('.close-btn');
+            closeBtn.addEventListener('click', function() {
+                removeChannel(getCurrentIndex());
+            });
+
+            if (!isMobile || isTablet) {
+                var header = card.querySelector('.card-header');
+                
+                header.addEventListener('mousedown', function(e) {
+                    startDrag(e, getCurrentIndex());
+                });
+                
+                if (isTouchDevice()) {
+                    header.addEventListener('touchstart', function(e) {
+                        if (e.touches.length === 1) {
+                            e.preventDefault();
+                            startDrag(e, getCurrentIndex());
+                        }
+                    }, { passive: false });
+                }
+
+                var resizeHandle = card.querySelector('.resize-handle');
+                if (resizeHandle) {
+                    resizeHandle.addEventListener('mousedown', function(e) {
+                        startResize(e, getCurrentIndex());
+                    });
+                    
+                    if (isTouchDevice()) {
+                        resizeHandle.addEventListener('touchstart', function(e) {
+                            e.preventDefault();
+                            if (e.touches.length === 1) {
+                                startResize(e, getCurrentIndex());
+                            }
+                        }, { passive: false });
+                    }
+                }
+            }
+            
+            if (isTouchDevice() && isTablet) {
+                card.addEventListener('touchstart', function(e) {
+                    if (e.touches.length === 2) {
+                        e.preventDefault();
+                        startPinchZoom(e, getCurrentIndex());
+                    }
+                }, { passive: false });
+            }
+            
+            if (isMobile && isTouchDevice()) {
+                var videoWrapper = card.querySelector('.video-wrapper');
+                var lastTap = 0;
+                videoWrapper.addEventListener('touchend', function(e) {
+                    var currentTime = new Date().getTime();
+                    var tapLength = currentTime - lastTap;
+                    if (tapLength < 300 && tapLength > 0) {
+                        e.preventDefault();
+                        toggleFullscreen(getCurrentIndex());
+                    }
+                    lastTap = currentTime;
+                });
+            }
+        }
+
+        // ====== INIZIALIZZAZIONE VIDEO ======
+        function initializeVideo(index) {
+            var video = document.getElementById('video-' + index);
+            var status = document.getElementById('status-' + index);
+            var channel = channels[index];
+
+            if (!video || !channel) {
+                console.error('Video or channel not found:', index);
+                return;
+            }
+            
+            if (!channel.url || channel.url.trim() === '') {
+                status.textContent = '✗ URL non valido';
+                status.className = 'status error';
+                return;
+            }
+
+            status.textContent = '⏳ Caricamento...';
+            status.className = 'status loading';
+
+            video.muted = channel.isMuted;
+            
+            // FIX: Rimuovi { once: true } per catturare tutti gli errori
+            video.addEventListener('error', function() {
+                status.textContent = '✗ Errore media';
+                status.className = 'status error';
+            });
+
+            if (typeof shaka !== 'undefined' && shaka.Player.isBrowserSupported()) {
+                // FIX: Distruggi istanza precedente se esiste
+                if (shakaPlayers[index]) {
+                    try { shakaPlayers[index].destroy(); } catch(e) {}
+                }
+
+                var player = new shaka.Player();
+                
+                // Configurazione ottimizzata
+                player.configure({
+                    streaming: {
+                        bufferingGoal: 90,
+                        rebufferingGoal: 2,
+                        bufferBehind: 90,
+                        retryParameters: {
+                            maxAttempts: 4,
+                            baseDelay: 1000,
+                            backoffFactor: 2,
+                            fuzzFactor: 0.5,
+                            timeout: 30000
+                        }
+                    }
+                });
+
+                // Gestione errori
+                player.addEventListener('error', function(event) {
+                    var error = event.detail;
+                    console.error('Shaka Error:', error);
+                    
+                    if (error.severity === shaka.util.Error.Severity.CRITICAL) {
+                        switch(error.category) {
+                            case shaka.util.Error.Category.NETWORK:
+                                status.textContent = '✗ Errore rete';
+                                status.className = 'status error';
+                                break;
+                            case shaka.util.Error.Category.MEDIA:
+                                status.textContent = '✗ Errore media';
+                                status.className = 'status error';
+                                break;
+                            default:
+                                status.textContent = '✗ Errore fatale';
+                                status.className = 'status error';
+                                break;
+                        }
+                    }
+                });
+                
+                try {
+                    player.attach(video).then(function() {
+                        shakaPlayers[index] = player;
+                        return player.load(channel.url);
+                    }).then(function() {
+                        // Manifest caricato con successo
+                        video.play().then(function() {
+                            status.textContent = '● Live';
+                            status.className = 'status playing';
+                            debouncedUpdatePriorities();
+                        }).catch(function(err) {
+                            console.warn('Autoplay bloccato, provo muted:', err.message);
+                            // FIX: Fallback autoplay muted se il browser lo blocca
+                            video.muted = true;
+                            channel.isMuted = true;
+                            video.play().then(function() {
+                                status.textContent = '● Live (muto)';
+                                status.className = 'status playing';
+                                // Aggiorna UI audio button
+                                var audioBtn = document.getElementById('audio-' + index);
+                                if (audioBtn) {
+                                    audioBtn.classList.remove('unmuted');
+                                    audioBtn.classList.add('muted');
+                                    audioBtn.querySelector('span').textContent = '🔇 Muto';
+                                }
+                                debouncedUpdatePriorities();
+                            }).catch(function() {
+                                status.textContent = '⚠ Tap per avviare';
+                                status.className = 'status error';
+                            });
+                        });
+                    }).catch(function(error) {
+                        console.error('Shaka load error:', error);
+                        status.textContent = '✗ URL invalido';
+                        status.className = 'status error';
+                    });
+                } catch(err) {
+                    console.error('Shaka init error:', err);
+                    status.textContent = '✗ URL invalido';
+                    status.className = 'status error';
+                    return;
+                }
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari nativo HLS
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play().then(function() {
+                        status.textContent = '● Live';
+                        status.className = 'status playing';
+                        debouncedUpdatePriorities();
+                    }).catch(function() {
+                        video.muted = true;
+                        channel.isMuted = true;
+                        video.play().catch(function() {
+                            status.textContent = '⚠ Tap per avviare';
+                            status.className = 'status error';
+                        });
+                    });
+                });
+            } else {
+                status.textContent = '✗ HLS non supportato';
+                status.className = 'status error';
+            }
+
+            video.addEventListener('volumechange', debouncedUpdatePriorities);
+            video.addEventListener('play', debouncedUpdatePriorities);
+            video.addEventListener('pause', debouncedUpdatePriorities);
+        }
+
+        // ====== TOGGLE VIDEO ======
+        function toggleVideo(index) {
+            var card = document.getElementById('card-' + index);
+            var toggle = document.getElementById('toggle-' + index);
+            var label = toggle.nextElementSibling;
+            var status = document.getElementById('status-' + index);
+
+            channels[index].isActive = !channels[index].isActive;
+
+            if (channels[index].isActive) {
+                card.classList.remove('disabled');
+                card.classList.add('active');
+                toggle.classList.add('on');
+                label.textContent = 'Video ON';
+                initializeVideo(index);
+            } else {
+                card.classList.remove('active');
+                card.classList.add('disabled');
+                toggle.classList.remove('on');
+                label.textContent = 'Video OFF';
+                
+                // FIX: Usa la funzione di cleanup centralizzata
+                destroyVideoInstance(index);
+                
+                status.textContent = '○ Spento';
+                status.className = 'status';
+            }
+
+            debouncedUpdatePriorities();
+        }
+
+        // ====== TOGGLE AUDIO ======
+        function toggleAudio(index) {
+            var video = document.getElementById('video-' + index);
+            var audioBtn = document.getElementById('audio-' + index);
+            
+            if (!video) return;
+
+            channels[index].isMuted = !channels[index].isMuted;
+            video.muted = channels[index].isMuted;
+
+            if (channels[index].isMuted) {
+                audioBtn.classList.remove('unmuted');
+                audioBtn.classList.add('muted');
+                audioBtn.querySelector('span').textContent = '🔇 Muto';
+            } else {
+                audioBtn.classList.remove('muted');
+                audioBtn.classList.add('unmuted');
+                audioBtn.querySelector('span').textContent = '🔊 Audio';
+            }
+
+            debouncedUpdatePriorities();
+        }
+
+        // ====== DRAG & DROP ======
+        function startDrag(e, index) {
+            if (isMobile && !isTablet) return;
+            
+            e.preventDefault();
+            draggedElement = document.getElementById('card-' + index);
+            
+            if (!draggedElement) return;
+            
+            var coords = getEventCoords(e);
+            var rect = draggedElement.getBoundingClientRect();
+            offsetX = coords.x - rect.left;
+            offsetY = coords.y - rect.top;
+            
+            // Porta in primo piano durante il drag
+            draggedElement.style.zIndex = 9999;
+
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+            
+            if (isTouchDevice()) {
+                document.addEventListener('touchmove', drag, { passive: false });
+                document.addEventListener('touchend', stopDrag);
+                document.addEventListener('touchcancel', stopDrag);
+            }
+        }
+
+        function drag(e) {
+            if (!draggedElement) return;
+            
+            e.preventDefault();
+            var coords = getEventCoords(e);
+            var container = document.getElementById('gridContainer');
+            
+            if (!container) return;
+            
+            var containerRect = container.getBoundingClientRect();
+            var newX = Math.max(0, coords.x - containerRect.left - offsetX);
+            var newY = Math.max(0, coords.y - containerRect.top - offsetY);
+
+            draggedElement.style.left = newX + 'px';
+            draggedElement.style.top = newY + 'px';
+        }
+
+        function stopDrag() {
+            if (draggedElement) {
+                var index = parseInt(draggedElement.id.split('-')[1]);
+                channels[index].x = parseInt(draggedElement.style.left) || 0;
+                channels[index].y = parseInt(draggedElement.style.top) || 0;
+                debouncedUpdatePriorities(); // Ripristina z-index corretto
+            }
+            
+            draggedElement = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+            
+            if (isTouchDevice()) {
+                document.removeEventListener('touchmove', drag);
+                document.removeEventListener('touchend', stopDrag);
+                document.removeEventListener('touchcancel', stopDrag);
+            }
+        }
+
+        // ====== RESIZE ======
+        function startResize(e, index) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            resizingElement = document.getElementById('card-' + index);
+            
+            if (!resizingElement) return;
+            
+            var coords = getEventCoords(e);
+            startX = coords.x;
+            startY = coords.y;
+            startWidth = parseInt(resizingElement.style.width) || resizingElement.offsetWidth;
+            startHeight = parseInt(resizingElement.style.height) || resizingElement.offsetHeight;
+
+            document.addEventListener('mousemove', resize);
+            document.addEventListener('mouseup', stopResize);
+            
+            if (isTouchDevice()) {
+                document.addEventListener('touchmove', resize, { passive: false });
+                document.addEventListener('touchend', stopResize);
+                document.addEventListener('touchcancel', stopResize);
+            }
+        }
+
+        function resize(e) {
+            if (!resizingElement) return;
+            
+            e.preventDefault();
+            var coords = getEventCoords(e);
+            var newWidth = Math.max(300, startWidth + (coords.x - startX));
+            var newHeight = Math.max(250, startHeight + (coords.y - startY));
+
+            resizingElement.style.width = newWidth + 'px';
+            resizingElement.style.height = newHeight + 'px';
+        }
+
+        function stopResize() {
+            if (resizingElement) {
+                var index = parseInt(resizingElement.id.split('-')[1]);
+                channels[index].width = parseInt(resizingElement.style.width);
+                channels[index].height = parseInt(resizingElement.style.height);
+                debouncedUpdatePriorities();
+            }
+            
+            resizingElement = null;
+            document.removeEventListener('mousemove', resize);
+            document.removeEventListener('mouseup', stopResize);
+            
+            if (isTouchDevice()) {
+                document.removeEventListener('touchmove', resize);
+                document.removeEventListener('touchend', stopResize);
+                document.removeEventListener('touchcancel', stopResize);
+            }
+        }
+
+        // ====== PINCH TO ZOOM (TABLET) ======
+        function startPinchZoom(e, index) {
+            if (e.touches.length !== 2) return;
+            
+            resizingElement = document.getElementById('card-' + index);
+            
+            if (!resizingElement) return;
+            
+            touchStartDistance = getTouchDistance(e.touches[0], e.touches[1]);
+            initialPinchWidth = parseInt(resizingElement.style.width) || resizingElement.offsetWidth;
+            initialPinchHeight = parseInt(resizingElement.style.height) || resizingElement.offsetHeight;
+            
+            document.addEventListener('touchmove', pinchZoom, { passive: false });
+            document.addEventListener('touchend', stopPinchZoom);
+        }
+
+        function pinchZoom(e) {
+            if (!resizingElement || e.touches.length !== 2) return;
+            
+            e.preventDefault();
+            var currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+            var scale = currentDistance / touchStartDistance;
+            
+            var newWidth = Math.max(300, Math.min(1200, initialPinchWidth * scale));
+            var newHeight = Math.max(250, Math.min(900, initialPinchHeight * scale));
+            
+            resizingElement.style.width = newWidth + 'px';
+            resizingElement.style.height = newHeight + 'px';
+        }
+
+        function stopPinchZoom() {
+            if (resizingElement) {
+                var index = parseInt(resizingElement.id.split('-')[1]);
+                channels[index].width = parseInt(resizingElement.style.width);
+                channels[index].height = parseInt(resizingElement.style.height);
+                debouncedUpdatePriorities();
+            }
+            
+            resizingElement = null;
+            touchStartDistance = 0;
+            document.removeEventListener('touchmove', pinchZoom);
+            document.removeEventListener('touchend', stopPinchZoom);
+        }
+
+        // ====== FULLSCREEN (MOBILE) ======
+        function toggleFullscreen(index) {
+            var video = document.getElementById('video-' + index);
+            if (!video) return;
+            
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                } else if (video.webkitEnterFullscreen) {
+                    // FIX: iOS Safari supporta solo questo metodo
+                    video.webkitEnterFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            }
+        }
+
+        // ====== RIMOZIONE CANALE ======
+        function removeChannel(index) {
+            var card = document.getElementById('card-' + index);
+            if (!card) return;
+
+            // FIX: Usa cleanup centralizzato
+            destroyVideoInstance(index);
+
+            card.remove();
+            channels.splice(index, 1);
+            updateCardIndices();
+            debouncedUpdatePriorities();
+        }
+
+        // ====== AGGIORNAMENTO INDICI ======
+        function updateCardIndices() {
+            var container = document.getElementById('gridContainer');
+            var cards = container.querySelectorAll('.video-card');
+            
+            // FIX: Aggiorna anche le istanze Shaka con i nuovi indici
+            var newShakaPlayers = {};
+            
+            cards.forEach(function(card, newIndex) {
+                var oldIndex = parseInt(card.id.split('-')[1]);
+                
+                card.id = 'card-' + newIndex;
+                
+                var video = card.querySelector('video');
+                if (video) video.id = 'video-' + newIndex;
+                
+                var toggle = card.querySelector('.toggle-switch');
+                if (toggle) toggle.id = 'toggle-' + newIndex;
+                
+                var audioBtn = card.querySelector('.audio-control');
+                if (audioBtn) audioBtn.id = 'audio-' + newIndex;
+                
+                var status = card.querySelector('.status');
+                if (status) status.id = 'status-' + newIndex;
+                
+                // Rimappa istanza Shaka Player
+                if (shakaPlayers[oldIndex]) {
+                    newShakaPlayers[newIndex] = shakaPlayers[oldIndex];
+                }
+            });
+            
+            shakaPlayers = newShakaPlayers;
+        }
+
+        // ====== MODAL MANAGEMENT ======
+        var modal = document.getElementById('addStreamModal');
+        var addStreamBtn = document.getElementById('addStreamBtn');
+        var cancelBtn = document.getElementById('cancelBtn');
+        var confirmBtn = document.getElementById('confirmBtn');
+        var channelNameInput = document.getElementById('channelName');
+        var streamUrlInput = document.getElementById('streamUrl');
+
+        addStreamBtn.addEventListener('click', function() {
+            modal.classList.add('active');
+            channelNameInput.value = '';
+            streamUrlInput.value = '';
+            channelNameInput.focus();
+        });
+
+        cancelBtn.addEventListener('click', function() {
+            modal.classList.remove('active');
+        });
+
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                modal.classList.remove('active');
+            }
+        });
+        
+        // FIX: Supporto tasto Escape per chiudere modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+            }
+            // FIX: Supporto Enter per confermare nel modal
+            if (e.key === 'Enter' && modal.classList.contains('active')) {
+                confirmBtn.click();
+            }
+        });
+
+        confirmBtn.addEventListener('click', function() {
+            var name = channelNameInput.value.trim();
+            var url = streamUrlInput.value.trim();
+
+            if (!name || !url) {
+                alert('Inserisci nome e URL dello stream');
+                return;
+            }
+            
+            // FIX: Validazione URL base
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                alert('L\'URL deve iniziare con http:// o https://');
+                return;
+            }
+
+            var gridOffset = channels.length % 3;
+            var rowOffset = Math.floor(channels.length / 3);
+
+            channels.push({
+                name: name,
+                url: url,
+                x: 20 + gridOffset * 420,
+                y: 20 + rowOffset * 380,
+                width: 400,
+                height: 350,
+                isActive: false,
+                isMuted: true
+            });
+
+            initializeGrid();
+            modal.classList.remove('active');
+        });
+
+        // ====== SALVA/CARICA CONFIGURAZIONE ======
+        var saveConfigBtn = document.getElementById('saveConfigBtn');
+        var loadConfigBtn = document.getElementById('loadConfigBtn');
+
+        function showButtonFeedback(button, text, color, duration) {
+            var originalText = button.innerHTML;
+            var originalBg = button.style.background;
+            
+            button.innerHTML = text;
+            button.style.background = color;
+            button.disabled = true;
+            
+            setTimeout(function() {
+                button.innerHTML = originalText;
+                button.style.background = originalBg;
+                button.disabled = false;
+            }, duration);
+        }
+
+        saveConfigBtn.addEventListener('click', function() {
+            try {
+                var configData = {
+                    version: '1.0',
+                    timestamp: new Date().toISOString(),
+                    channels: channels
+                };
+
+                var blob = new Blob([JSON.stringify(configData, null, 2)], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                
+                a.href = url;
+                a.download = 'mosaic-tv-config-' + new Date().toISOString().split('T')[0] + '.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showButtonFeedback(saveConfigBtn, '✓ Salvato!', 'linear-gradient(135deg, #2ecc71, #27ae60)', 2000);
+            } catch(e) {
+                console.error('Errore salvataggio:', e);
+                alert('Errore nel salvataggio della configurazione');
+            }
+        });
+
+        loadConfigBtn.addEventListener('click', function() {
+            var fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.json';
+
+            fileInput.addEventListener('change', function(e) {
+                var file = e.target.files[0];
+                if (!file) return;
+
+                var reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        var configData = JSON.parse(event.target.result);
+                        
+                        if (configData.channels && Array.isArray(configData.channels)) {
+                            channels = configData.channels.map(function(ch) {
+                                return {
+                                    name: ch.name || 'Senza nome',
+                                    url: ch.url || '',
+                                    x: ch.x || 0,
+                                    y: ch.y || 0,
+                                    width: ch.width || 400,
+                                    height: ch.height || 350,
+                                    isActive: ch.isActive || false,
+                                    isMuted: ch.isMuted !== undefined ? ch.isMuted : true
+                                };
+                            });
+
+                            initializeGrid();
+                            showButtonFeedback(loadConfigBtn, '✓ Caricato!', 'linear-gradient(135deg, #2ecc71, #27ae60)', 2000);
+                        } else {
+                            alert('File di configurazione non valido');
+                        }
+                    } catch(e) {
+                        console.error('Errore lettura config:', e);
+                        alert('Errore nella lettura del file');
+                    }
+                };
+
+                reader.readAsText(file);
+            });
+
+            fileInput.click();
+        });
+
+        // ====== RESPONSIVE HANDLING ======
+        window.addEventListener('resize', debounce(function() {
+            var wasMobile = isMobile;
+            var wasTablet = isTablet;
+            
+            isMobile = window.innerWidth <= 768;
+            isTablet = window.innerWidth > 480 && window.innerWidth <= 1024;
+            
+            if (wasMobile !== isMobile || wasTablet !== isTablet) {
+                initializeGrid();
+            }
+        }, 250));
+        
+        if (window.screen && window.screen.orientation) {
+            window.screen.orientation.addEventListener('change', function() {
+                setTimeout(initializeGrid, 300);
+            });
+        } else {
+            window.addEventListener('orientationchange', function() {
+                setTimeout(initializeGrid, 300);
+            });
+        }
+        
+        // Previeni zoom accidentale su iOS
+        if (isTouchDevice()) {
+            document.addEventListener('touchstart', function(e) {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+        }
+
+        // ====== INIZIALIZZAZIONE ======
+        // Installa polyfill di Shaka Player per compatibilità cross-browser
+        if (typeof shaka !== 'undefined') {
+            shaka.polyfill.installAll();
+        }
+        
+        initializeGrid();
+    </script>
+</body>
+</html>

@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0e27">
+    <title>Mosaic TV</title>
+    <script src="https://cdn.jsdelivr.net/npm/shaka-player@5.0.0/dist/shaka-player.compiled.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Archivo', sans-serif; background: #0a0e27; min-height: 100vh; overflow: hidden; color: #fff; -webkit-tap-highlight-color: transparent; touch-action: pan-y; }
+        button, .toggle-switch, .card-header { -webkit-tap-highlight-color: rgba(0, 255, 159, 0.2); }
+        .btn, .audio-control, .toggle-switch, .close-btn { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+
+        @media (max-width: 768px) {
+            .btn { min-height: 44px; }
+            .close-btn { width: 32px; height: 32px; font-size: 18px; }
+            .toggle-switch { width: 60px; height: 30px; }
+            .toggle-slider { width: 22px; height: 22px; }
+            .toggle-switch.on .toggle-slider { transform: translateX(30px); }
+            .audio-control { min-height: 44px; padding: 10px 18px; }
+        }
+        .top-bar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: rgba(15, 20, 40, 0.95); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; padding: 0 20px; gap: 20px; z-index: 1000; }
+        .logo { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 20px; color: #00ff9f; text-shadow: 0 0 20px rgba(0, 255, 159, 0.5); }
+        .top-bar-buttons { display: flex; gap: 10px; margin-left: auto; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.3s ease; }
+        .add-stream-btn { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; box-shadow: 0 4px 15px rgba(0, 255, 159, 0.3); }
+        .add-stream-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(0, 255, 159, 0.5); }
+        .save-btn { background: linear-gradient(135deg, #f093fb, #f5576c); color: white; box-shadow: 0 4px 15px rgba(240, 147, 251, 0.3); }
+        .save-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(240, 147, 251, 0.5); }
+        .load-btn { background: linear-gradient(135deg, #fa709a, #fee140); color: #0a0e27; box-shadow: 0 4px 15px rgba(250, 112, 154, 0.3); }
+        .load-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(250, 112, 154, 0.5); }
+        .grid-container { position: absolute; top: 60px; left: 0; right: 0; bottom: 0; padding: 20px; overflow: auto; }
+        .grid-container.mobile-layout { display: flex; flex-direction: column; gap: 25px; }
+        .video-card { position: absolute; background: rgba(20, 25, 45, 0.9); border: 2px solid rgba(0, 255, 159, 0.2); border-radius: 12px; padding: 15px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); transition: border-color 0.3s ease, box-shadow 0.3s ease; min-width: 300px; min-height: 250px; z-index: 1; }
+        .video-card.active { border-color: rgba(0, 255, 159, 0.8); box-shadow: 0 10px 40px rgba(0, 255, 159, 0.3); }
+        .video-card.audio-playing { border-color: rgba(255, 215, 0, 1) !important; box-shadow: 0 0 30px rgba(255, 215, 0, 0.6), 0 0 60px rgba(255, 215, 0, 0.3) !important; border-width: 3px !important; }
+        .video-card.disabled { opacity: 0.5; }
+        .video-card.disabled .video-wrapper video { pointer-events: none; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; cursor: move; padding: 5px; border-radius: 6px; transition: background 0.2s ease; }
+        .card-header:hover { background: rgba(0, 255, 159, 0.1); }
+        .channel-name { font-size: 16px; font-weight: 700; color: #00ff9f; text-transform: uppercase; letter-spacing: 1px; }
+        .card-controls { display: flex; gap: 8px; }
+        .close-btn { width: 24px; height: 24px; background: #ff4757; border: none; border-radius: 50%; color: white; font-size: 16px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
+        .close-btn:hover { background: #ff3838; transform: scale(1.1); }
+        .video-wrapper { position: relative; width: 100%; height: calc(100% - 100px); background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+        video { width: 100%; height: 100%; display: block; object-fit: contain; }
+        .controls-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .toggle-container { display: flex; align-items: center; gap: 8px; }
+        .toggle-switch { position: relative; width: 50px; height: 26px; background: #2c3e50; border-radius: 13px; cursor: pointer; transition: background 0.3s ease; border: 2px solid rgba(255, 255, 255, 0.2); }
+        .toggle-switch.on { background: linear-gradient(135deg, #00ff9f, #00b8ff); }
+        .toggle-slider { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: white; border-radius: 50%; transition: transform 0.3s ease; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
+        .toggle-switch.on .toggle-slider { transform: translateX(24px); }
+        .toggle-label { font-size: 12px; color: #95a5a6; font-weight: 600; }
+        .toggle-switch.on + .toggle-label { color: #00ff9f; }
+        .audio-control { padding: 8px 16px; font-size: 14px; font-weight: 600; border: 2px solid; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px; background: transparent; }
+        .audio-control.muted { border-color: #ff4757; color: #ff4757; }
+        .audio-control.muted:hover { background: #ff4757; color: white; }
+        .audio-control.unmuted { border-color: #00ff9f; color: #00ff9f; }
+        .audio-control.unmuted:hover { background: #00ff9f; color: #0a0e27; }
+        .status { font-size: 11px; color: #7f8c8d; padding: 4px 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; font-family: 'Space Mono', monospace; }
+        .status.loading { color: #3498db; }
+        .status.error { color: #e74c3c; }
+        .status.playing { color: #2ecc71; }
+        .resize-handle { position: absolute; width: 15px; height: 15px; background: #00ff9f; border: 2px solid #0a0e27; border-radius: 3px; cursor: nwse-resize; opacity: 0; transition: opacity 0.2s ease; }
+        .video-card:hover .resize-handle { opacity: 1; }
+        .resize-handle.bottom-right { bottom: 5px; right: 5px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(5px); z-index: 2000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1a1f35; padding: 30px; border-radius: 12px; border: 2px solid rgba(0, 255, 159, 0.3); max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+        .modal-header { font-size: 24px; font-weight: 700; color: #00ff9f; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 14px; font-weight: 600; color: #95a5a6; margin-bottom: 8px; }
+        .form-input { width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: white; font-size: 14px; transition: border-color 0.3s ease; }
+        .form-input:focus { outline: none; border-color: #00ff9f; }
+        .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+        .modal-btn.cancel { background: transparent; border: 2px solid #7f8c8d; color: #7f8c8d; }
+        .modal-btn.cancel:hover { border-color: #95a5a6; color: #95a5a6; }
+        .modal-btn.confirm { background: linear-gradient(135deg, #00ff9f, #00b8ff); color: #0a0e27; }
+        .modal-btn.confirm:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 255, 159, 0.5); }
+
+        @media (max-width: 768px) {
+            .top-bar { padding: 0 10px; flex-wrap: wrap; height: auto; min-height: 60px; }
+            .logo { font-size: 16px; }
+            .top-bar-buttons { width: 100%; justify-content: space-between; margin-top: 10px; margin-left: 0; }
+            .btn { padding: 8px 12px; font-size: 12px; flex: 1; }
+            .grid-container { top: 120px; padding: 10px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+            .grid-container.mobile-layout { gap: 30px; padding: 15px; }
+            .video-card { position: relative !important; width: 100% !important; height: auto !important; min-height: 300px !important; margin-bottom: 30px !important; left: 0 !important; top: 0 !important; }
+            .card-header { cursor: default; }
+            .video-wrapper { height: 250px !important; }
+            .controls-row { justify-content: space-between; }
+            .resize-handle { display: none; }
+            .modal-content { width: 95%; padding: 20px; }
+        }
+        @media (min-width: 481px) and (max-width: 768px) {
+            .video-card { min-height: 400px !important; margin-bottom: 35px !important; }
+            .video-wrapper { height: 320px !important; }
+            .grid-container.mobile-layout { gap: 35px; }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .grid-container { padding: 15px; }
+            .video-card { min-width: 350px; min-height: 280px; }
+            .resize-handle { opacity: 0.7; width: 20px; height: 20px; }
+            .card-header { padding: 8px; }
+        }
+        @media (max-width: 480px) {
+            .controls-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .toggle-container, .audio-control { width: 100%; justify-content: center; }
+            .video-wrapper { height: 220px !important; }
+            .logo { font-size: 14px; }
+            .btn { font-size: 11px; padding: 6px 10px; }
+            .video-card { margin-bottom: 25px !important; }
+            .grid-container.mobile-layout { gap: 25px; }
+        }
+        @media (max-width: 768px) and (orientation: landscape) {
+            .top-bar { height: 50px; min-height: 50px; padding: 0 8px; }
+            .grid-container { top: 100px; }
+            .video-wrapper { height: 200px !important; }
+            .logo { font-size: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">📺 MOSAIC TV</div>
+        <div class="top-bar-buttons">
+            <button class="btn add-stream-btn" id="addStreamBtn">+ Aggiungi Stream</button>
+            <button class="btn save-btn" id="saveConfigBtn">💾 Salva Config</button>
+            <button class="btn load-btn" id="loadConfigBtn">📂 Carica Config</button>
+        </div>
+    </div>
+    <div class="grid-container" id="gridContainer"></div>
+
+    <div class="modal" id="addStreamModal">
+        <div class="modal-content">
+            <div class="modal-header">Aggiungi Stream</div>
+            <div class="form-group">
+                <label class="form-label">Nome Canale</label>
+                <input type="text" class="form-input" id="channelName" placeholder="Scrivi nome canale">
+            </div>
+            <div class="form-group">
+                <label class="form-label">URL Stream (HLS/DASH)</label>
+                <input type="text" class="form-input" id="streamUrl" placeholder="https://...">
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="cancelBtn">Annulla</button>
+                <button class="modal-btn confirm" id="confirmBtn">Aggiungi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ====== STATO GLOBALE ======
+        var channels = [];
+        var shakaPlayers = {};
+        var dragState = null;   // { el, offsetX, offsetY }
+        var resizeState = null; // { el, startX, startY, startW, startH }
+        var pinchState = null;  // { el, startDist, startW, startH }
+        var isMobile = window.innerWidth <= 768;
+        var isTablet = window.innerWidth > 480 && window.innerWidth <= 1024;
+        var _touchDevice = null;
+        var _rafDrag = null;
+        var _rafResize = null;
+
+        // ====== DOM CACHE ======
+        var $container = document.getElementById('gridContainer');
+        var $modal = document.getElementById('addStreamModal');
+        var $channelName = document.getElementById('channelName');
+        var $streamUrl = document.getElementById('streamUrl');
+
+        // ====== UTILITY ======
+        function debounce(fn, ms) {
+            var t;
+            return function() {
+                var ctx = this, a = arguments;
+                clearTimeout(t);
+                t = setTimeout(function() { fn.apply(ctx, a); }, ms);
+            };
+        }
+
+        function isTouchDevice() {
+            if (_touchDevice === null) _touchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            return _touchDevice;
+        }
+
+        function evtXY(e) {
+            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            return { x: e.clientX || 0, y: e.clientY || 0 };
+        }
+
+        function touchDist(a, b) {
+            var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function cardIndex(el) {
+            return parseInt(el.id.split('-')[1]);
+        }
+
+        function escapeHtml(text) {
+            var d = document.createElement('div');
+            d.appendChild(document.createTextNode(text));
+            return d.innerHTML;
+        }
+
+        // ====== Z-INDEX / PRIORITÀ ======
+        function updateZIndexPriorities() {
+            if (isMobile) return;
+            var cards = $container.querySelectorAll('.video-card');
+            if (!cards.length) return;
+
+            for (var i = 0; i < cards.length; i++) {
+                var card = cards[i];
+                var idx = cardIndex(card);
+                var ch = channels[idx];
+                var vid = document.getElementById('video-' + idx);
+                var playing = vid && !vid.paused && vid.readyState > 2;
+                var hasAudio = ch && ch.isActive && !ch.isMuted && playing;
+
+                if (!ch || !ch.isActive) {
+                    card.style.zIndex = 1;
+                    card.classList.remove('audio-playing');
+                } else if (hasAudio) {
+                    card.style.zIndex = 1000 + (parseInt(card.style.width) || 300);
+                    card.classList.add('audio-playing');
+                } else {
+                    card.style.zIndex = 100 + (parseInt(card.style.width) || 300);
+                    card.classList.remove('audio-playing');
+                }
+            }
+        }
+        var debouncedUpdatePriorities = debounce(updateZIndexPriorities, 300);
+
+        // ====== SHAKA CLEANUP ======
+        function destroyAllShaka() {
+            var keys = Object.keys(shakaPlayers);
+            for (var i = 0; i < keys.length; i++) {
+                try { shakaPlayers[keys[i]].destroy(); } catch(e) {}
+            }
+            shakaPlayers = {};
+        }
+
+        function destroyVideoInstance(index) {
+            var vid = document.getElementById('video-' + index);
+            if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
+            if (shakaPlayers[index]) {
+                try { shakaPlayers[index].destroy(); } catch(e) {}
+                delete shakaPlayers[index];
+            }
+        }
+
+        // ====== GRIGLIA ======
+        function initializeGrid() {
+            destroyAllShaka();
+            $container.innerHTML = '';
+            $container.classList.toggle('mobile-layout', isMobile);
+            for (var i = 0; i < channels.length; i++) createVideoCard(channels[i], i);
+        }
+
+        // ====== CREAZIONE CARD ======
+        function createVideoCard(channel, index) {
+            var card = document.createElement('div');
+            card.className = 'video-card' + (channel.isActive ? ' active' : ' disabled');
+            card.id = 'card-' + index;
+
+            if (!isMobile) {
+                card.style.cssText = 'left:' + channel.x + 'px;top:' + channel.y + 'px;width:' + channel.width + 'px;height:' + channel.height + 'px;';
+            }
+
+            card.innerHTML =
+                '<div class="card-header"><span class="channel-name">' + escapeHtml(channel.name) + '</span>' +
+                '<div class="card-controls"><button class="close-btn" aria-label="Chiudi">×</button></div></div>' +
+                '<div class="video-wrapper"><video id="video-' + index + '" muted playsinline' + (channel.isActive ? ' autoplay' : '') + '></video></div>' +
+                '<div class="controls-row"><div class="toggle-container">' +
+                '<div class="toggle-switch' + (channel.isActive ? ' on' : '') + '" id="toggle-' + index + '"><div class="toggle-slider"></div></div>' +
+                '<span class="toggle-label">Video ' + (channel.isActive ? 'ON' : 'OFF') + '</span></div>' +
+                '<button class="audio-control ' + (channel.isMuted ? 'muted' : 'unmuted') + '" id="audio-' + index + '">' +
+                '<span>' + (channel.isMuted ? '🔇 Muto' : '🔊 Audio') + '</span></button>' +
+                '<span class="status" id="status-' + index + '">● Pronto</span></div>' +
+                (isMobile ? '' : '<div class="resize-handle bottom-right"></div>');
+
+            $container.appendChild(card);
+            setupCardEvents(card, index);
+            if (channel.isActive) initializeVideo(index);
+        }
+
+        // ====== EVENTI CARD (delegati via closure con getCurrentIndex) ======
+        function setupCardEvents(card, index) {
+            function idx() { return cardIndex(card); }
+
+            card.querySelector('.toggle-switch').addEventListener('click', function() { toggleVideo(idx()); });
+            card.querySelector('.audio-control').addEventListener('click', function() { toggleAudio(idx()); });
+            card.querySelector('.close-btn').addEventListener('click', function() { removeChannel(idx()); });
+
+            if (!isMobile || isTablet) {
+                var header = card.querySelector('.card-header');
+                header.addEventListener('mousedown', function(e) { startDrag(e, idx()); });
+                if (isTouchDevice()) {
+                    header.addEventListener('touchstart', function(e) {
+                        if (e.touches.length === 1) { e.preventDefault(); startDrag(e, idx()); }
+                    }, { passive: false });
+                }
+                var rh = card.querySelector('.resize-handle');
+                if (rh) {
+                    rh.addEventListener('mousedown', function(e) { startResize(e, idx()); });
+                    if (isTouchDevice()) {
+                        rh.addEventListener('touchstart', function(e) {
+                            e.preventDefault();
+                            if (e.touches.length === 1) startResize(e, idx());
+                        }, { passive: false });
+                    }
+                }
+            }
+
+            if (isTouchDevice() && isTablet) {
+                card.addEventListener('touchstart', function(e) {
+                    if (e.touches.length === 2) { e.preventDefault(); startPinchZoom(e, idx()); }
+                }, { passive: false });
+            }
+
+            if (isMobile && isTouchDevice()) {
+                var lastTap = 0;
+                card.querySelector('.video-wrapper').addEventListener('touchend', function(e) {
+                    var now = Date.now();
+                    if (now - lastTap < 300 && now - lastTap > 0) { e.preventDefault(); toggleFullscreen(idx()); }
+                    lastTap = now;
+                });
+            }
+        }
+
+        // ====== VIDEO INIT (buffer aumentato) ======
+        function initializeVideo(index) {
+            var video = document.getElementById('video-' + index);
+            var status = document.getElementById('status-' + index);
+            var channel = channels[index];
+            if (!video || !channel) return;
+            if (!channel.url || !channel.url.trim()) { status.textContent = '✗ URL non valido'; status.className = 'status error'; return; }
+
+            status.textContent = '⏳ Caricamento...';
+            status.className = 'status loading';
+            video.muted = channel.isMuted;
+
+            video.addEventListener('error', function() { status.textContent = '✗ Errore media'; status.className = 'status error'; });
+
+            if (typeof shaka !== 'undefined' && shaka.Player.isBrowserSupported()) {
+                if (shakaPlayers[index]) { try { shakaPlayers[index].destroy(); } catch(e) {} }
+
+                var player = new shaka.Player();
+                player.configure({
+                    streaming: {
+                        bufferingGoal: 180,
+                        rebufferingGoal: 3,
+                        bufferBehind: 120,
+                        retryParameters: { maxAttempts: 5, baseDelay: 1000, backoffFactor: 2, fuzzFactor: 0.5, timeout: 30000 }
+                    }
+                });
+
+                player.addEventListener('error', function(event) {
+                    var err = event.detail;
+                    if (err.severity === shaka.util.Error.Severity.CRITICAL) {
+                        var msg = err.category === shaka.util.Error.Category.NETWORK ? '✗ Errore rete' :
+                                  err.category === shaka.util.Error.Category.MEDIA ? '✗ Errore media' : '✗ Errore fatale';
+                        status.textContent = msg;
+                        status.className = 'status error';
+                    }
+                });
+
+                player.attach(video).then(function() {
+                    shakaPlayers[index] = player;
+                    return player.load(channel.url);
+                }).then(function() {
+                    return video.play();
+                }).then(function() {
+                    status.textContent = '● Live';
+                    status.className = 'status playing';
+                    debouncedUpdatePriorities();
+                }).catch(function(err) {
+                    // Autoplay fallback muted
+                    video.muted = true;
+                    channel.isMuted = true;
+                    video.play().then(function() {
+                        status.textContent = '● Live (muto)';
+                        status.className = 'status playing';
+                        var ab = document.getElementById('audio-' + index);
+                        if (ab) { ab.classList.remove('unmuted'); ab.classList.add('muted'); ab.querySelector('span').textContent = '🔇 Muto'; }
+                        debouncedUpdatePriorities();
+                    }).catch(function() {
+                        status.textContent = '⚠ Tap per avviare';
+                        status.className = 'status error';
+                    });
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play().then(function() {
+                        status.textContent = '● Live'; status.className = 'status playing'; debouncedUpdatePriorities();
+                    }).catch(function() {
+                        video.muted = true; channel.isMuted = true;
+                        video.play().catch(function() { status.textContent = '⚠ Tap per avviare'; status.className = 'status error'; });
+                    });
+                });
+            } else {
+                status.textContent = '✗ HLS non supportato'; status.className = 'status error';
+            }
+
+            video.addEventListener('volumechange', debouncedUpdatePriorities);
+            video.addEventListener('play', debouncedUpdatePriorities);
+            video.addEventListener('pause', debouncedUpdatePriorities);
+        }
+
+        // ====== TOGGLE VIDEO/AUDIO ======
+        function toggleVideo(index) {
+            var card = document.getElementById('card-' + index);
+            var toggle = document.getElementById('toggle-' + index);
+            var label = toggle.nextElementSibling;
+            var status = document.getElementById('status-' + index);
+            channels[index].isActive = !channels[index].isActive;
+
+            if (channels[index].isActive) {
+                card.classList.remove('disabled'); card.classList.add('active');
+                toggle.classList.add('on'); label.textContent = 'Video ON';
+                initializeVideo(index);
+            } else {
+                card.classList.remove('active'); card.classList.add('disabled');
+                toggle.classList.remove('on'); label.textContent = 'Video OFF';
+                destroyVideoInstance(index);
+                status.textContent = '○ Spento'; status.className = 'status';
+            }
+            debouncedUpdatePriorities();
+        }
+
+        function toggleAudio(index) {
+            var video = document.getElementById('video-' + index);
+            var btn = document.getElementById('audio-' + index);
+            if (!video) return;
+            channels[index].isMuted = !channels[index].isMuted;
+            video.muted = channels[index].isMuted;
+            btn.classList.toggle('muted', channels[index].isMuted);
+            btn.classList.toggle('unmuted', !channels[index].isMuted);
+            btn.querySelector('span').textContent = channels[index].isMuted ? '🔇 Muto' : '🔊 Audio';
+            debouncedUpdatePriorities();
+        }
+
+        // ====== DRAG (con rAF) ======
+        function startDrag(e, index) {
+            if (isMobile && !isTablet) return;
+            e.preventDefault();
+            var el = document.getElementById('card-' + index);
+            if (!el) return;
+            var c = evtXY(e), r = el.getBoundingClientRect();
+            dragState = { el: el, ox: c.x - r.left, oy: c.y - r.top };
+            el.style.zIndex = 9999;
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+            if (isTouchDevice()) {
+                document.addEventListener('touchmove', onDrag, { passive: false });
+                document.addEventListener('touchend', stopDrag);
+                document.addEventListener('touchcancel', stopDrag);
+            }
+        }
+        function onDrag(e) {
+            if (!dragState) return;
+            e.preventDefault();
+            var c = evtXY(e);
+            if (_rafDrag) cancelAnimationFrame(_rafDrag);
+            _rafDrag = requestAnimationFrame(function() {
+                if (!dragState) return;
+                var cr = $container.getBoundingClientRect();
+                dragState.el.style.left = Math.max(0, c.x - cr.left - dragState.ox) + 'px';
+                dragState.el.style.top = Math.max(0, c.y - cr.top - dragState.oy) + 'px';
+            });
+        }
+        function stopDrag() {
+            if (dragState) {
+                var idx = cardIndex(dragState.el);
+                channels[idx].x = parseInt(dragState.el.style.left) || 0;
+                channels[idx].y = parseInt(dragState.el.style.top) || 0;
+                debouncedUpdatePriorities();
+            }
+            dragState = null;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            if (isTouchDevice()) {
+                document.removeEventListener('touchmove', onDrag);
+                document.removeEventListener('touchend', stopDrag);
+                document.removeEventListener('touchcancel', stopDrag);
+            }
+        }
+
+        // ====== RESIZE (con rAF) ======
+        function startResize(e, index) {
+            e.preventDefault(); e.stopPropagation();
+            var el = document.getElementById('card-' + index);
+            if (!el) return;
+            var c = evtXY(e);
+            resizeState = { el: el, sx: c.x, sy: c.y, sw: parseInt(el.style.width) || el.offsetWidth, sh: parseInt(el.style.height) || el.offsetHeight };
+            document.addEventListener('mousemove', onResize);
+            document.addEventListener('mouseup', stopResize);
+            if (isTouchDevice()) {
+                document.addEventListener('touchmove', onResize, { passive: false });
+                document.addEventListener('touchend', stopResize);
+                document.addEventListener('touchcancel', stopResize);
+            }
+        }
+        function onResize(e) {
+            if (!resizeState) return;
+            e.preventDefault();
+            var c = evtXY(e);
+            if (_rafResize) cancelAnimationFrame(_rafResize);
+            _rafResize = requestAnimationFrame(function() {
+                if (!resizeState) return;
+                resizeState.el.style.width = Math.max(300, resizeState.sw + (c.x - resizeState.sx)) + 'px';
+                resizeState.el.style.height = Math.max(250, resizeState.sh + (c.y - resizeState.sy)) + 'px';
+            });
+        }
+        function stopResize() {
+            if (resizeState) {
+                var idx = cardIndex(resizeState.el);
+                channels[idx].width = parseInt(resizeState.el.style.width);
+                channels[idx].height = parseInt(resizeState.el.style.height);
+                debouncedUpdatePriorities();
+            }
+            resizeState = null;
+            document.removeEventListener('mousemove', onResize);
+            document.removeEventListener('mouseup', stopResize);
+            if (isTouchDevice()) {
+                document.removeEventListener('touchmove', onResize);
+                document.removeEventListener('touchend', stopResize);
+                document.removeEventListener('touchcancel', stopResize);
+            }
+        }
+
+        // ====== PINCH ZOOM ======
+        function startPinchZoom(e, index) {
+            if (e.touches.length !== 2) return;
+            var el = document.getElementById('card-' + index);
+            if (!el) return;
+            pinchState = { el: el, d0: touchDist(e.touches[0], e.touches[1]), sw: parseInt(el.style.width) || el.offsetWidth, sh: parseInt(el.style.height) || el.offsetHeight };
+            document.addEventListener('touchmove', onPinch, { passive: false });
+            document.addEventListener('touchend', stopPinch);
+        }
+        function onPinch(e) {
+            if (!pinchState || e.touches.length !== 2) return;
+            e.preventDefault();
+            var s = touchDist(e.touches[0], e.touches[1]) / pinchState.d0;
+            pinchState.el.style.width = Math.max(300, Math.min(1200, pinchState.sw * s)) + 'px';
+            pinchState.el.style.height = Math.max(250, Math.min(900, pinchState.sh * s)) + 'px';
+        }
+        function stopPinch() {
+            if (pinchState) {
+                var idx = cardIndex(pinchState.el);
+                channels[idx].width = parseInt(pinchState.el.style.width);
+                channels[idx].height = parseInt(pinchState.el.style.height);
+                debouncedUpdatePriorities();
+            }
+            pinchState = null;
+            document.removeEventListener('touchmove', onPinch);
+            document.removeEventListener('touchend', stopPinch);
+        }
+
+        // ====== FULLSCREEN ======
+        function toggleFullscreen(index) {
+            var v = document.getElementById('video-' + index);
+            if (!v) return;
+            var fse = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!fse) {
+                (v.requestFullscreen || v.webkitRequestFullscreen || v.webkitEnterFullscreen || function(){}).call(v);
+            } else {
+                (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+            }
+        }
+
+        // ====== RIMOZIONE CANALE ======
+        function removeChannel(index) {
+            var card = document.getElementById('card-' + index);
+            if (!card) return;
+            destroyVideoInstance(index);
+            card.remove();
+            channels.splice(index, 1);
+            reindexCards();
+            debouncedUpdatePriorities();
+        }
+
+        function reindexCards() {
+            var cards = $container.querySelectorAll('.video-card');
+            var newPlayers = {};
+            for (var i = 0; i < cards.length; i++) {
+                var old = cardIndex(cards[i]);
+                cards[i].id = 'card-' + i;
+                var v = cards[i].querySelector('video'); if (v) v.id = 'video-' + i;
+                var t = cards[i].querySelector('.toggle-switch'); if (t) t.id = 'toggle-' + i;
+                var a = cards[i].querySelector('.audio-control'); if (a) a.id = 'audio-' + i;
+                var s = cards[i].querySelector('.status'); if (s) s.id = 'status-' + i;
+                if (shakaPlayers[old]) newPlayers[i] = shakaPlayers[old];
+            }
+            shakaPlayers = newPlayers;
+        }
+
+        // ====== MODAL ======
+        document.getElementById('addStreamBtn').addEventListener('click', function() {
+            $modal.classList.add('active'); $channelName.value = ''; $streamUrl.value = ''; $channelName.focus();
+        });
+        document.getElementById('cancelBtn').addEventListener('click', function() { $modal.classList.remove('active'); });
+        $modal.addEventListener('click', function(e) { if (e.target === $modal) $modal.classList.remove('active'); });
+
+        document.addEventListener('keydown', function(e) {
+            if (!$modal.classList.contains('active')) return;
+            if (e.key === 'Escape') $modal.classList.remove('active');
+            if (e.key === 'Enter') document.getElementById('confirmBtn').click();
+        });
+
+        document.getElementById('confirmBtn').addEventListener('click', function() {
+            var name = $channelName.value.trim();
+            var url = $streamUrl.value.trim();
+            if (!name || !url) { alert('Inserisci nome e URL dello stream'); return; }
+            if (!/^https?:\/\//.test(url)) { alert("L'URL deve iniziare con http:// o https://"); return; }
+
+            var col = channels.length % 3, row = Math.floor(channels.length / 3);
+            var ch = { name: name, url: url, x: 20 + col * 420, y: 20 + row * 380, width: 400, height: 350, isActive: false, isMuted: true };
+            channels.push(ch);
+            // Appendi solo la nuova card anziché ricostruire tutto
+            createVideoCard(ch, channels.length - 1);
+            $modal.classList.remove('active');
+        });
+
+        // ====== SALVA / CARICA CONFIG ======
+        function showBtnFeedback(btn, text, bg, ms) {
+            var ot = btn.innerHTML, ob = btn.style.background;
+            btn.innerHTML = text; btn.style.background = bg; btn.disabled = true;
+            setTimeout(function() { btn.innerHTML = ot; btn.style.background = ob; btn.disabled = false; }, ms);
+        }
+
+        document.getElementById('saveConfigBtn').addEventListener('click', function() {
+            try {
+                var blob = new Blob([JSON.stringify({ version: '1.0', timestamp: new Date().toISOString(), channels: channels }, null, 2)], { type: 'application/json' });
+                var u = URL.createObjectURL(blob), a = document.createElement('a');
+                a.href = u; a.download = 'mosaic-tv-config-' + new Date().toISOString().split('T')[0] + '.json';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
+                showBtnFeedback(this, '✓ Salvato!', 'linear-gradient(135deg, #2ecc71, #27ae60)', 2000);
+            } catch(e) { alert('Errore nel salvataggio'); }
+        });
+
+        document.getElementById('loadConfigBtn').addEventListener('click', function() {
+            var fi = document.createElement('input'); fi.type = 'file'; fi.accept = '.json';
+            fi.addEventListener('change', function(e) {
+                var file = e.target.files[0]; if (!file) return;
+                var r = new FileReader();
+                r.onload = function(ev) {
+                    try {
+                        var d = JSON.parse(ev.target.result);
+                        if (d.channels && Array.isArray(d.channels)) {
+                            channels = d.channels.map(function(c) {
+                                return { name: c.name || 'Senza nome', url: c.url || '', x: c.x || 0, y: c.y || 0, width: c.width || 400, height: c.height || 350, isActive: c.isActive || false, isMuted: c.isMuted !== undefined ? c.isMuted : true };
+                            });
+                            initializeGrid();
+                            showBtnFeedback(document.getElementById('loadConfigBtn'), '✓ Caricato!', 'linear-gradient(135deg, #2ecc71, #27ae60)', 2000);
+                        } else { alert('File di configurazione non valido'); }
+                    } catch(e) { alert('Errore nella lettura del file'); }
+                };
+                r.readAsText(file);
+            });
+            fi.click();
+        });
+
+        // ====== RESPONSIVE ======
+        window.addEventListener('resize', debounce(function() {
+            var wm = isMobile, wt = isTablet;
+            isMobile = window.innerWidth <= 768;
+            isTablet = window.innerWidth > 480 && window.innerWidth <= 1024;
+            if (wm !== isMobile || wt !== isTablet) initializeGrid();
+        }, 250));
+
+        if (window.screen && window.screen.orientation) {
+            window.screen.orientation.addEventListener('change', function() { setTimeout(initializeGrid, 300); });
+        } else {
+            window.addEventListener('orientationchange', function() { setTimeout(initializeGrid, 300); });
+        }
+
+        if (isTouchDevice()) {
+            document.addEventListener('touchstart', function(e) { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+        }
+
+        // ====== INIT ======
+        if (typeof shaka !== 'undefined') shaka.polyfill.installAll();
+        initializeGrid();
+    </script>
+</body>
+</html>
